@@ -947,5 +947,5 @@ void Gravity()
 			luigi.rect.top += luigi.dropSpeed;
 			luigi.rect.bottom += luigi.dropSpeed;
 		}
-	}
+	} 
 }
