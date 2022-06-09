@@ -1,35 +1,35 @@
 #pragma comment (lib,"msimg32.lib")
+#pragma comment(lib,"winmm.lib")
 
 #include <Windows.h>
 #include <tchar.h>
+#include <mmsystem.h>
 #include <random>
 
 #define WINDOW_WIDTH 1200
 #define WINDOW_HEIGHT 800
 
-#define MAX_MONSTER 100
-
 #define PLAYER_WIDTH 80
 #define PLAYER_HEIGHT 80
 
+#define MAX_MONSTER 100
 #define MAX_ITEM 100 
-
 #define MAX_BULLET	100 
-
-// #define JumpPower 65.f
 
 using std::default_random_engine;
 using std::random_device;
 using std::uniform_int_distribution;
 
-enum class Dir { LEFT = 0, RIGHT, UP, DOWN };
+enum class Dir { IDLE=0, LEFT, RIGHT, UP, DOWN };
 enum class ItemType { WOOD = 0, SPRING, TRAP };
 enum class Stage { ONE = 0, TWO, THREE, ENDING };
 enum class PlayMode { P1 = 0, P2 };
 
 struct Bullet {
 	RECT rect;
+	Dir dir;
 	int aIndex;
+	bool isLoad;
 };
 
 struct Player {
@@ -38,10 +38,12 @@ struct Player {
 	Bullet bullets[MAX_BULLET];
 	TCHAR lifeArr[5];
 	int aIndex; // Animation Index
-	int bIndex; // Bullet Index
+	int bAIndex; // Bullet Animation Index
+	int bulletCount;	// numOfBullet; 
 	int score;
 	int life;
 	bool isJump;
+	bool isShot;
 	float gravity = 1.f;
 	float dropSpeed = 0.f;
 };
@@ -118,6 +120,7 @@ void DrawLuigi(HDC, HDC, const HBITMAP, HBITMAP);
 void DrawGate(HDC, HDC, const HBITMAP, HBITMAP, const Stage);
 void DrawItem(HDC, HDC, const HBITMAP, HBITMAP, const HBITMAP, HBITMAP, const HBITMAP, HBITMAP);
 void DrawEndingScene(HDC, HDC, const HBITMAP, HBITMAP);
+void DrawBullet(HDC, HDC, const HBITMAP, HBITMAP, const Player, const int, const int, const int, const int);
 
 void ShowText(HDC);
 
@@ -178,6 +181,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	static HBITMAP hSpring, oldSpring;
 	static HBITMAP hTrap, oldTrap;
 	static HBITMAP hEndingScene, oldEndingScene;
+	static HBITMAP hBullet, oldBullet;
 
 	static int cX, cY;
 
@@ -187,8 +191,12 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch (uMsg)
 	{
 	case WM_CREATE:
+		PlaySound(L"let-the-games.wav", NULL, SND_ASYNC |  SND_LOOP);
 		stage = Stage::ONE;
-
+		mario.dir = Dir::IDLE;
+		luigi.dir = Dir::IDLE;
+		mario.bulletCount = 0;
+		luigi.bulletCount = 0;
 		RECT c;
 		GetClientRect(hWnd, &c);
 
@@ -213,6 +221,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			LR_LOADFROMFILE | LR_CREATEDIBSECTION)));
 		hEndingScene = static_cast<HBITMAP>(LoadImage(g_hInst, TEXT("Opening Sequences.bmp"), IMAGE_BITMAP, 0, 0,
 			LR_LOADFROMFILE | LR_CREATEDIBSECTION));
+		hBullet = static_cast<HBITMAP>(LoadImage(g_hInst,TEXT("bullet.bmp"), IMAGE_BITMAP, 0, 0,
+			LR_LOADFROMFILE | LR_CREATEDIBSECTION));	
+
 
 		GetObject(hMario, sizeof(BITMAP), &Mariobmp);
 		GetObject(hLuigi, sizeof(BITMAP), &Luigibmp);
@@ -242,7 +253,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		SetTimer(hWnd, 1000, 5000, NULL);
 		SetTimer(hWnd, 1, 1000, NULL);	// 아이템 시간
 
-		SetTimer(hWnd, 8, 16, (TIMERPROC)TimerProc);
+		SetTimer(hWnd, 8, 30, (TIMERPROC)TimerProc);
 		break;
 	case WM_MOUSEMOVE:
 		mX = LOWORD(lParam);
@@ -304,6 +315,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				items[itemIndex].itemType = ItemType::WOOD;
 			break;
 		case VK_SPACE:
+		
 			if (!mario.isJump) {
 				mario.rect.top -= 3;
 				mario.rect.bottom -= 3;
@@ -321,28 +333,60 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				SetTimer(hWnd, 2000, 1, NULL);
 			}
 			break;
+
 			// Mario Attack
-		case VK_SHIFT:
+		case VK_TAB:
+			mario.isShot = true;
+			mario.bullets[mario.bulletCount].isLoad = true;
+			mario.bullets[mario.bulletCount].dir = mario.dir;
 
-			switch (mario.dir)
-			{
-			case Dir::RIGHT:
-				break;
-			default:
-				break;
-			}
-			break;
-
-			// Luigi Attack 
-		case VK_BACK:
-
-			switch (luigi.dir)
+			switch (mario.bullets[mario.bulletCount].dir)
 			{
 			case Dir::LEFT:
+				mario.bullets[mario.bulletCount].rect.right = mario.rect.left;
+				mario.bullets[mario.bulletCount].rect.left = mario.bullets[mario.bulletCount].rect.right - 40;
+				mario.bullets[mario.bulletCount].rect.top =  (mario.rect.top + mario.rect.bottom ) / 2 - 5;
+				mario.bullets[mario.bulletCount].rect.bottom = mario.bullets[mario.bulletCount].rect.top + 40;
+				break;
+			case Dir::RIGHT:
+				mario.bullets[mario.bulletCount].rect.left = mario.rect.right;
+				mario.bullets[mario.bulletCount].rect.top = (mario.rect.top + mario.rect.bottom) / 2 - 5;
+				mario.bullets[mario.bulletCount].rect.right = mario.bullets[mario.bulletCount].rect.left + 40;
+				mario.bullets[mario.bulletCount].rect.bottom = mario.bullets[mario.bulletCount].rect.top + 40;
 				break;
 			default:
 				break;
 			}
+			mario.bulletCount %= MAX_BULLET;
+			mario.bulletCount++;
+			SetTimer(hWnd, 4000, 1, NULL);
+			break;
+			// Luigi Attack 
+		case VK_BACK:
+			luigi.isShot = true;
+			luigi.bullets[luigi.bulletCount].isLoad = true; 
+			luigi.bullets[luigi.bulletCount].dir = luigi.dir;
+
+			switch (luigi.bullets[luigi.bulletCount].dir)
+			{
+			case Dir::LEFT:
+				luigi.bullets[luigi.bulletCount].rect.right = luigi.rect.left;
+				luigi.bullets[luigi.bulletCount].rect.left = luigi.bullets[luigi.bulletCount].rect.right - 40;
+				luigi.bullets[luigi.bulletCount].rect.top = (luigi.rect.top + luigi.rect.bottom) / 2 - 5;
+				luigi.bullets[luigi.bulletCount].rect.bottom = luigi.bullets[luigi.bulletCount].rect.top + 40;
+				break;
+			case Dir::RIGHT:
+				luigi.bullets[luigi.bulletCount].rect.left = luigi.rect.right;
+				luigi.bullets[luigi.bulletCount].rect.top = (luigi.rect.top + luigi.rect.bottom) / 2 - 5;
+				luigi.bullets[luigi.bulletCount].rect.right = luigi.bullets[luigi.bulletCount].rect.left + 40;
+				luigi.bullets[luigi.bulletCount].rect.bottom = luigi.bullets[luigi.bulletCount].rect.top + 40;
+				break;
+			default:
+				break;
+			}
+			luigi.bulletCount %= MAX_BULLET;
+			luigi.bulletCount++;
+			SetTimer(hWnd, 5000, 1, NULL);
 			break;
 		case 'r':
 			Reset(hWnd);
@@ -352,26 +396,44 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			break;
 		case 'g':
 			if (IntersectRect(&temp, &mario.rect, &gateSpot)) {
-				if (Stage::ONE == stage)
+				switch (stage)
+				{
+				case Stage::ONE:
 					stage = Stage::TWO;
-				else if (Stage::TWO == stage)
+					break;
+				case Stage::TWO:
 					stage = Stage::THREE;
-				else if (Stage::THREE == stage)
+					break;
+				case Stage::THREE:
 					stage = Stage::ENDING;
-				else
+					break;
+				case Stage::ENDING:
 					stage = Stage::ONE;
+					break;
+				default:
+					break;
+				}
 				mario.score++;
 
 			}
 			else if (IntersectRect(&temp, &luigi.rect, &gateSpot)) {
-				if (Stage::ONE == stage)
+				switch (stage)
+				{
+				case Stage::ONE:
 					stage = Stage::TWO;
-				else if (Stage::TWO == stage)
+					break;
+				case Stage::TWO:
 					stage = Stage::THREE;
-				else if (Stage::THREE == stage)
+					break;
+				case Stage::THREE:
 					stage = Stage::ENDING;
-				else
+					break;
+				case Stage::ENDING:
 					stage = Stage::ONE;
+					break;
+				default:
+					break;
+				}
 				luigi.score++;
 			}
 
@@ -444,6 +506,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		DrawItem(backMemDC, memDC, hWood, oldWood, hSpring, oldSpring, hTrap, oldTrap);
 
 		ShowText(backMemDC);
+
+		if (mario.isShot) {
+			for (int index = 0; index < mario.bulletCount; ++index) {
+				if (mario.bullets[index].isLoad) {
+					DrawBullet(backMemDC, memDC, hBullet, oldBullet, mario,mario.bullets[index].rect.left, mario.bullets[index].rect.top, mario.bullets[index].rect.right, mario.bullets[index].rect.bottom);
+				}
+			}
+		}
+
+		if (luigi.isShot) {
+			for (int index = 0; index < luigi.bulletCount; ++index) {
+				if (luigi.bullets[index].isLoad) {
+					DrawBullet(backMemDC, memDC, hBullet, oldBullet, luigi, luigi.bullets[index].rect.left, luigi.bullets[index].rect.top, luigi.bullets[index].rect.right, luigi.bullets[index].rect.bottom);
+				}
+			}
+		}  
 
 		if (flag) {
 			for (int index = 0; index < itemIndex; ++index)
@@ -543,15 +621,101 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				}
 			}
 			break;
+		case 4000:
+			// 어차피 애니메이션 인덱스는 없으니까, 좌표만 움직여주면 됩니다. 
+			for (int index = 0; index < mario.bulletCount; ++index) {
+				switch (mario.bullets[index].dir)
+				{
+				case Dir::UP:
+					break;
+				case Dir::DOWN:
+					break;
+				case Dir::LEFT:
+					mario.bullets[index].rect.left -= 10;
+					mario.bullets[index].rect.right -= 10;
+
+					/* 여기서 몬스터와 총알 충돌체크 */
+
+
+					break;
+				case Dir::RIGHT:
+					mario.bullets[index].rect.left += 10;
+					mario.bullets[index].rect.right += 10;
+
+					/* 여기서 몬스터와 총알 충돌체크 */
+
+
+
+
+
+
+					break;
+				default:
+					break;
+				}
+			}
+			break;
+		case 5000:
+			// 어차피 애니메이션 인덱스는 없으니까, 좌표만 움직여주면 됩니다. 
+
+			for (int index = 0; index < luigi.bulletCount; ++index) {
+				switch (luigi.bullets[index].dir)
+				{
+				case Dir::UP:
+					break;
+				case Dir::DOWN:
+					break;
+				case Dir::LEFT:
+					luigi.bullets[index].rect.left -= 10;
+					luigi.bullets[index].rect.right -= 10;
+
+					/* 여기서 몬스터와 총알 충돌체크 */
+
+
+
+
+
+
+
+
+
+
+
+					break;
+				case Dir::RIGHT:
+					luigi.bullets[index].rect.left += 10;
+					luigi.bullets[index].rect.right += 10;
+					
+					/* 여기서 몬스터와 총알 충돌체크 */
+
+
+
+
+
+
+
+
+
+
+
+					break;
+				default:
+					break;
+				}
+			}
+			break;
 		default:
 			break;
 		}
+		InvalidateRect(hWnd, NULL, FALSE);
 		break;
 	case WM_DESTROY:
 		KillTimer(hWnd, 1);
 		KillTimer(hWnd, 1000);
 		KillTimer(hWnd, 2000);
 		KillTimer(hWnd, 3000);
+		KillTimer(hWnd, 4000);
+		KillTimer(hWnd, 5000);
 		PostQuitMessage(0);
 		break;
 	default:
@@ -640,6 +804,7 @@ void DrawItem(HDC backMemDC, HDC memDC, const HBITMAP hWood, HBITMAP oldWood, co
 		}
 	}
 }
+
 void DrawEndingScene(HDC backMemDC, HDC memDC, const HBITMAP hEndingScene, HBITMAP oldEndingScene)
 {
 	oldEndingScene = static_cast<HBITMAP>(SelectObject(memDC, hEndingScene));
@@ -650,6 +815,13 @@ void DrawEndingScene(HDC backMemDC, HDC memDC, const HBITMAP hEndingScene, HBITM
 		TransparentBlt(backMemDC, 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, memDC, 667, 3060, 810, 830, RGB(122, 122, 122));
 
 	SelectObject(memDC, oldEndingScene);
+}
+
+void DrawBullet(HDC backMemDC, HDC memDC, const HBITMAP hBullet, HBITMAP oldBullet, const Player player, const int left, const int top, const int right, const int bottom)
+{
+	oldBullet = static_cast<HBITMAP>(SelectObject(memDC, hBullet));
+	TransparentBlt(backMemDC,left, top, right-left, bottom-top, memDC, 0, 0, 37, 37, RGB(147, 187, 236));
+	SelectObject(memDC, oldBullet);
 }
 
 void ShowText(HDC backMemDC)
@@ -688,8 +860,6 @@ void ShowText(HDC backMemDC)
 	DeleteObject(hFont);
 }
 
-
-
 void PreviewItem(HDC backMemDC, HDC memDC, const HBITMAP hWood, HBITMAP oldWood, const HBITMAP hSpring, HBITMAP oldSpring, const HBITMAP hTrap, HBITMAP oldTrap, const ItemType type)
 {
 	switch (type)
@@ -726,7 +896,7 @@ void ShowAllFrameRect(HDC backMemDC, const RECT* marioRect, const RECT* luigiRec
 
 	DeleteObject(hBrush);
 
-	hBrush = CreateSolidBrush(RGB(233, 129, 56));
+	hBrush = CreateSolidBrush(RGB(0, 0, 255));
 	oldBrush = static_cast<HBRUSH>(SelectObject(backMemDC, hBrush));
 
 	FrameRect(backMemDC, itemRect, hBrush);
@@ -737,6 +907,7 @@ void ShowAllFrameRect(HDC backMemDC, const RECT* marioRect, const RECT* luigiRec
 
 // ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 void CALLBACK TimerProc(HWND hWnd, UINT uMsg, UINT idEvent, DWORD dwTime) {
+
 	//타이머에서는 객체들의 이동 처리
 	Gravity();
 	if (0 == itemTimeCount) {
