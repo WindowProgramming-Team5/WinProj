@@ -4,6 +4,7 @@
 #include <Windows.h>
 #include <tchar.h>
 #include <mmsystem.h>
+#include <fmod.h>
 #include <random>
 
 #define WINDOW_WIDTH 1200
@@ -16,6 +17,8 @@
 #define MAX_ITEM 100 
 #define MAX_BULLET	100 
 
+#define CHANNEL_COUNT 3
+
 using std::default_random_engine;
 using std::random_device;
 using std::uniform_int_distribution;
@@ -23,12 +26,10 @@ using std::uniform_int_distribution;
 enum class Dir { IDLE=0, LEFT, RIGHT, UP, DOWN };
 enum class ItemType { WOOD = 0, SPRING, TRAP };
 enum class Stage { ONE = 0, TWO, THREE, ENDING };
-enum class PlayMode { P1 = 0, P2 };
 
 struct Bullet {
 	RECT rect;
 	Dir dir;
-	int aIndex;
 	bool isLoad;
 };
 
@@ -60,6 +61,12 @@ struct Item {
 
 default_random_engine dre{ random_device{}() };
 uniform_int_distribution<int> uiRandomItem{ 0,2 };
+
+FMOD_SYSTEM* soundSystem;
+FMOD_SOUND* bgmSound;
+FMOD_SOUND* jumpSound;
+FMOD_SOUND* fireSound;
+FMOD_CHANNEL* channel[CHANNEL_COUNT];
 
 Item items[MAX_ITEM];
 
@@ -191,7 +198,14 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 	switch (uMsg)
 	{
 	case WM_CREATE:
-		PlaySound(L"let-the-games.wav", NULL, SND_ASYNC |  SND_LOOP);
+		FMOD_System_Create(&soundSystem);
+		FMOD_System_Init(soundSystem, CHANNEL_COUNT, FMOD_INIT_NORMAL, NULL);
+		FMOD_System_CreateSound(soundSystem, "let-the-games.wav", FMOD_LOOP_NORMAL, 0, &bgmSound);
+		FMOD_System_CreateSound(soundSystem, "Jump.wav", FMOD_DEFAULT | FMOD_LOOP_OFF, 0, &jumpSound);
+		FMOD_System_CreateSound(soundSystem, "smb_fireball.wav", FMOD_DEFAULT | FMOD_LOOP_OFF, 0, &fireSound);
+
+		FMOD_System_PlaySound(soundSystem, bgmSound, 0, false, &channel[0]);
+
 		stage = Stage::ONE;
 		mario.dir = Dir::IDLE;
 		luigi.dir = Dir::IDLE;
@@ -321,6 +335,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				mario.rect.bottom -= 3;
 				mario.isJump = TRUE;
 				marioTemp = mario.rect;
+				FMOD_System_PlaySound(soundSystem, jumpSound, 0, false, &channel[1]);
 				SetTimer(hWnd, 3000, 1, NULL);
 			}
 			break;
@@ -330,6 +345,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 				luigi.rect.bottom -= 3;
 				luigi.isJump = TRUE;
 				luigiTemp = luigi.rect;
+				FMOD_System_PlaySound(soundSystem, jumpSound, 0, false, &channel[1]);
 				SetTimer(hWnd, 2000, 1, NULL);
 			}
 			break;
@@ -359,6 +375,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 			mario.bulletCount %= MAX_BULLET;
 			mario.bulletCount++;
+			FMOD_System_PlaySound(soundSystem, fireSound, 0, false, &channel[2]);
 			SetTimer(hWnd, 4000, 1, NULL);
 			break;
 			// Luigi Attack 
@@ -386,6 +403,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 			}
 			luigi.bulletCount %= MAX_BULLET;
 			luigi.bulletCount++;
+			FMOD_System_PlaySound(soundSystem, fireSound, 0, false, &channel[2]);
 			SetTimer(hWnd, 5000, 1, NULL);
 			break;
 		case 'r':
@@ -716,6 +734,11 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 		KillTimer(hWnd, 3000);
 		KillTimer(hWnd, 4000);
 		KillTimer(hWnd, 5000);
+		FMOD_Sound_Release(bgmSound);
+		FMOD_Sound_Release(jumpSound);
+		FMOD_Sound_Release(fireSound);
+		FMOD_System_Release(soundSystem);
+		FMOD_System_Close(soundSystem);
 		PostQuitMessage(0);
 		break;
 	default:
